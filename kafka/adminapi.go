@@ -42,7 +42,7 @@ type AdminClient struct {
 	isDerived bool // Derived from existing client handle
 }
 
-// AdminOptions
+// AdminOptions FIXME
 type AdminOptions struct {
 	OperationTimeout time.Duration
 	RequestTimeout   time.Duration
@@ -52,18 +52,18 @@ type AdminOptions struct {
 func durationToMilliseconds(t time.Duration) int {
 	if t > 0 {
 		return (int)(t.Seconds() * 1000.0)
-	} else {
-		return (int)(t)
 	}
+	return (int)(t)
 }
 
 // adminOptionsToC converts Golang AdminOptions to C AdminOptions
-// forApi is used to limit what options may be set
-func (a *AdminClient) adminOptionsToC(forApi string, options *AdminOptions) (cOptions *C.rd_kafka_AdminOptions_t, err error) {
+// forAPI is used to limit what options may be set.
+func (a *AdminClient) adminOptionsToC(forAPI string, options *AdminOptions) (cOptions *C.rd_kafka_AdminOptions_t, err error) {
 	if options == nil {
 		return nil, nil
 	}
 
+	// FIXME: enforce forAPI
 	cOptions = C.rd_kafka_AdminOptions_new(a.handle.rk)
 
 	cErrstrSize := C.size_t(512)
@@ -105,6 +105,7 @@ func (a *AdminClient) adminOptionsToC(forApi string, options *AdminOptions) (cOp
 	return cOptions, nil
 }
 
+// TopicResult FIXME
 type TopicResult struct {
 	// Topic name of result.
 	Topic string
@@ -112,14 +113,15 @@ type TopicResult struct {
 	Error Error
 }
 
+// String provides a human-readable representation of a TopicResult
 func (t TopicResult) String() string {
 	if t.Error.code == 0 {
 		return t.Topic
-	} else {
-		return fmt.Sprintf("%s (%s)", t.Topic, t.Error.str)
 	}
+	return fmt.Sprintf("%s (%s)", t.Topic, t.Error.str)
 }
 
+// NewTopic FIXME
 type NewTopic struct {
 	// Topic name to create.
 	Topic string
@@ -136,6 +138,7 @@ type NewTopic struct {
 	Config            map[string]string
 }
 
+// NewPartitions FIXME
 type NewPartitions struct {
 	// Topic to create more partitions for.
 	Topic string
@@ -149,7 +152,7 @@ type NewPartitions struct {
 	ReplicaAssignment [][]int
 }
 
-// ResourceType
+// ResourceType FIXME
 type ResourceType int
 
 const (
@@ -170,7 +173,7 @@ func (t ResourceType) String() string {
 	return C.GoString(C.rd_kafka_ResourceType_name(C.rd_kafka_ResourceType_t(t)))
 }
 
-// ConfigSource
+// ConfigSource FIXME
 type ConfigSource int
 
 const (
@@ -184,7 +187,7 @@ const (
 	ConfigSourceDynamicDefaultBroker = ConfigSource(C.RD_KAFKA_CONFIG_SOURCE_DYNAMIC_DEFAULT_BROKER_CONFIG)
 	// ConfigSourceStaticBroker is static broker config provided as broker properties at startup (e.g. from server.properties file)
 	ConfigSourceStaticBroker = ConfigSource(C.RD_KAFKA_CONFIG_SOURCE_STATIC_BROKER_CONFIG)
-	// ConfigSource Default is built-in default configuration for configs that have a default value
+	// ConfigSourceDefault is built-in default configuration for configs that have a default value
 	ConfigSourceDefault = ConfigSource(C.RD_KAFKA_CONFIG_SOURCE_DEFAULT_CONFIG)
 )
 
@@ -193,6 +196,7 @@ func (t ConfigSource) String() string {
 	return C.GoString(C.rd_kafka_ConfigSource_name(C.rd_kafka_ConfigSource_t(t)))
 }
 
+// ConfigResource FIXME
 type ConfigResource struct {
 	// Type of resource to set.
 	Type ResourceType
@@ -202,6 +206,7 @@ type ConfigResource struct {
 	Config map[string]string
 }
 
+// ConfigEntry FIXME
 type ConfigEntry struct {
 	// Name of configuration entry, e.g., topic configuration property name.
 	Name string
@@ -219,6 +224,7 @@ type ConfigEntry struct {
 	Synonyms map[string]ConfigEntry
 }
 
+// ConfigResourceResult FIXME
 type ConfigResourceResult struct {
 	// Type of returned result resource.
 	Type ResourceType
@@ -300,6 +306,7 @@ func (a *AdminClient) cToTopicResults(cTopicRes **C.rd_kafka_topic_result_t, cCn
 	return result, nil
 }
 
+// CreateTopics FIXME
 func (a *AdminClient) CreateTopics(ctx context.Context, topics []NewTopic, options *AdminOptions) (result []TopicResult, err error) {
 	cTopics := make([]*C.rd_kafka_NewTopic_t, len(topics))
 
@@ -404,19 +411,23 @@ func (a *AdminClient) CreateTopics(ctx context.Context, topics []NewTopic, optio
 	return a.cToTopicResults(cTopicRes, cCnt)
 }
 
+// DeleteTopics FIXME
 func DeleteTopics(ctx context.Context, topics []string, options AdminOptions) (result []TopicResult, err error) {
 	return nil, nil
 
 }
 
+// CreatePartitions FIXME
 func CreatePartitions(ctx context.Context, partitions []NewPartitions, options AdminOptions) (result []TopicResult, err error) {
 	return nil, nil
 }
 
+// AlterConfigs FIXME
 func AlterConfigs(ctx context.Context, resources []ConfigResource, options AdminOptions) (result []ConfigResourceResult, err error) {
 	return nil, nil
 }
 
+// DescribeConfigs FIXME
 func DescribeConfigs(ctx context.Context, resources []ConfigResource, options AdminOptions) (result []ConfigResourceResult, err error) {
 	return nil, nil
 }
