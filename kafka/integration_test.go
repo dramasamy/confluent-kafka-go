@@ -17,8 +17,10 @@
 package kafka
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"testing"
 	"time"
@@ -1083,4 +1085,112 @@ func TestProducerConsumerHeaders(t *testing.T) {
 	}
 
 	c.Close()
+}
+
+func createAdminClient(t *testing.T) (a *AdminClient) {
+	numver, strver := LibraryVersion()
+	// FIXME: change to next release
+	if numver < 0x000b04ff {
+		t.Skipf("Requires librdkafka >=0.11.4 (currently on %s, 0x%x)", strver, numver)
+	}
+
+	if !testconfRead() {
+		t.Skipf("Missing testconf.json")
+	}
+
+	conf := ConfigMap{"bootstrap.servers": testconf.Brokers}
+	conf.updateFromTestconf()
+
+	/*
+	 * Create producer and produce a couple of messages with and without
+	 * headers.
+	 */
+	a, err := NewAdminClient(&conf)
+	if err != nil {
+		t.Fatalf("NewAdminClient: %v", err)
+	}
+
+	return a
+}
+
+func validateTopicResult(t *testing.T, result []TopicResult, expError map[string]Error) {
+	for _, res := range result {
+		exp, ok := expError[res.Topic]
+		if !ok {
+			t.Errorf("Result for unexpected topic %s", res)
+			continue
+		}
+
+		if res.Error.Code() != exp.Code() {
+			t.Errorf("Topic %s: expected \"%s\", got \"%s\"",
+				res.Topic, exp, res.Error)
+			continue
+		}
+
+		t.Logf("Topic %s: matched expected \"%s\"", res.Topic, res.Error)
+	}
+}
+
+func TestAdminTopics(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+
+	a := createAdminClient(t)
+	defer a.Close()
+
+	const topicCnt = 5
+	newTopics := make([]NewTopic, topicCnt)
+
+	expError := map[string]Error{}
+
+	for i := 0; i < topicCnt; i++ {
+		topic := fmt.Sprintf("%s-create-%d-%d", testconf.Topic, i, rand.Intn(100000))
+		newTopics[i] = NewTopic{
+			Topic:             topic,
+			NumPartitions:     1 + i*2,
+			ReplicationFactor: 2,
+		}
+		expError[newTopics[i].Topic] = Error{} // No error
+	}
+
+	maxDuration, err := time.ParseDuration("30s")
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+
+	// First just validate the topics, don't create
+	t.Logf("Validating topics before creation\n")
+	ctx, cancel := context.WithTimeout(context.Background(), maxDuration)
+	defer cancel()
+	result, err := a.CreateTopics(ctx, newTopics,
+		&AdminOptions{ValidateOnly: true})
+	if err != nil {
+		t.Fatalf("CreateTopics(ValidateOnly) failed: %s", err)
+	}
+
+	validateTopicResult(t, result, expError)
+
+	// Now create the topics
+	t.Logf("Creating topics\n")
+	ctx, cancel = context.WithTimeout(context.Background(), maxDuration)
+	defer cancel()
+	result, err = a.CreateTopics(ctx, newTopics, nil)
+	if err != nil {
+		t.Fatalf("CreateTopics() failed: %s", err)
+	}
+
+	validateTopicResult(t, result, expError)
+
+	// Attempt to create the topics again, should all fail.
+	t.Logf("Attempt to re-create topics, should all fail\n")
+	for k := range expError {
+		expError[k] = Error{code: ErrTopicAlreadyExists}
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), maxDuration)
+	defer cancel()
+	result, err = a.CreateTopics(ctx, newTopics, nil)
+	if err != nil {
+		t.Fatalf("CreateTopics#2() failed: %s", err)
+	}
+
+	validateTopicResult(t, result, expError)
 }

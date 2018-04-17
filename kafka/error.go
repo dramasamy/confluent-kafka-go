@@ -49,6 +49,10 @@ func newErrorFromCString(code C.rd_kafka_resp_err_t, cstr *C.char) (err Error) {
 	return Error{ErrorCode(code), str}
 }
 
+func newCErrorFromString(code C.rd_kafka_resp_err_t, str string) (err Error) {
+	return newErrorFromString(ErrorCode(code), str)
+}
+
 // Error returns a human readable representation of an Error
 // Same as Error.String()
 func (e Error) Error() string {
