@@ -45,9 +45,9 @@ func testAdminAPIs(what string, a *AdminClient, t *testing.T) {
 			{
 				Topic:         "mytopic2",
 				NumPartitions: 2,
-				ReplicaAssignment: [][]int{
-					[]int{1, 2, 3},
-					[]int{3, 2, 1},
+				ReplicaAssignment: [][]int32{
+					[]int32{1, 2, 3},
+					[]int32{3, 2, 1},
 				},
 			},
 			{
@@ -81,9 +81,9 @@ func testAdminAPIs(what string, a *AdminClient, t *testing.T) {
 				Topic:             "mytopic",
 				NumPartitions:     2,
 				ReplicationFactor: 3,
-				ReplicaAssignment: [][]int{
-					[]int{1, 2, 3},
-					[]int{3, 2, 1},
+				ReplicaAssignment: [][]int32{
+					[]int32{1, 2, 3},
+					[]int32{3, 2, 1},
 				},
 			},
 		},
@@ -108,9 +108,9 @@ func testAdminAPIs(what string, a *AdminClient, t *testing.T) {
 				// ReplicaAssignment must be same length as Numpartitions
 				Topic:         "mytopic",
 				NumPartitions: 7,
-				ReplicaAssignment: [][]int{
-					[]int{1, 2, 3},
-					[]int{3, 2, 1},
+				ReplicaAssignment: [][]int32{
+					[]int32{1, 2, 3},
+					[]int32{3, 2, 1},
 				},
 			},
 		},
@@ -134,16 +134,16 @@ func testAdminAPIs(what string, a *AdminClient, t *testing.T) {
 			{
 				Topic:         "mytopic4",
 				NumPartitions: 9,
-				ReplicaAssignment: [][]int{
-					[]int{1},
-					[]int{2},
-					[]int{3},
-					[]int{4},
-					[]int{1},
-					[]int{2},
-					[]int{3},
-					[]int{4},
-					[]int{1},
+				ReplicaAssignment: [][]int32{
+					[]int32{1},
+					[]int32{2},
+					[]int32{3},
+					[]int32{4},
+					[]int32{1},
+					[]int32{2},
+					[]int32{3},
+					[]int32{4},
+					[]int32{1},
 				},
 				Config: map[string]string{
 					"some.topic.config":  "unchecked",

@@ -1137,7 +1137,27 @@ func TestAdminTopics(t *testing.T) {
 	a := createAdminClient(t)
 	defer a.Close()
 
-	const topicCnt = 5
+	brokerList, err := getBrokerList(a)
+	if err != nil {
+		t.Fatalf("Failed to retrieve broker list: %v", err)
+	}
+
+	// Few and Many replica sets use in these tests
+	var fewReplicas []int32
+	if len(brokerList) < 2 {
+		fewReplicas = brokerList
+	} else {
+		fewReplicas = brokerList[0:2]
+	}
+
+	var manyReplicas []int32
+	if len(brokerList) < 5 {
+		manyReplicas = brokerList
+	} else {
+		manyReplicas = brokerList[0:5]
+	}
+
+	const topicCnt = 7
 	newTopics := make([]NewTopic, topicCnt)
 
 	expError := map[string]Error{}
@@ -1145,11 +1165,35 @@ func TestAdminTopics(t *testing.T) {
 	for i := 0; i < topicCnt; i++ {
 		topic := fmt.Sprintf("%s-create-%d-%d", testconf.Topic, i, rand.Intn(100000))
 		newTopics[i] = NewTopic{
-			Topic:             topic,
-			NumPartitions:     1 + i*2,
-			ReplicationFactor: 2,
+			Topic:         topic,
+			NumPartitions: 1 + i*2,
 		}
+
+		if (i % 1) == 0 {
+			newTopics[i].ReplicationFactor = len(fewReplicas)
+		} else {
+			newTopics[i].ReplicationFactor = len(manyReplicas)
+		}
+
 		expError[newTopics[i].Topic] = Error{} // No error
+
+		var useReplicas []int32
+		if i == 2 {
+			useReplicas = fewReplicas
+		} else if i == 3 {
+			useReplicas = manyReplicas
+		} else if i == topicCnt-1 {
+			newTopics[i].ReplicationFactor = len(brokerList) + 10
+			expError[newTopics[i].Topic] = Error{code: ErrInvalidReplicationFactor}
+		}
+
+		if len(useReplicas) > 0 {
+			newTopics[i].ReplicaAssignment = make([][]int32, newTopics[i].NumPartitions)
+			newTopics[i].ReplicationFactor = 0
+			for p := 0; p < newTopics[i].NumPartitions; p++ {
+				newTopics[i].ReplicaAssignment[p] = useReplicas
+			}
+		}
 	}
 
 	maxDuration, err := time.ParseDuration("30s")
@@ -1183,7 +1227,9 @@ func TestAdminTopics(t *testing.T) {
 	// Attempt to create the topics again, should all fail.
 	t.Logf("Attempt to re-create topics, should all fail\n")
 	for k := range expError {
-		expError[k] = Error{code: ErrTopicAlreadyExists}
+		if expError[k].code == ErrNoError {
+			expError[k] = Error{code: ErrTopicAlreadyExists}
+		}
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), maxDuration)
 	defer cancel()
@@ -1193,4 +1239,201 @@ func TestAdminTopics(t *testing.T) {
 	}
 
 	validateTopicResult(t, result, expError)
+
+	// Add partitions to some of the topics
+	t.Logf("Create new partitions for a subset of topics\n")
+	newParts := make([]NewPartitions, topicCnt/2)
+	expError = map[string]Error{}
+	for i := 0; i < topicCnt/2; i++ {
+		topic := newTopics[i].Topic
+		newParts[i] = NewPartitions{
+			Topic:         topic,
+			NewTotalCount: newTopics[i].NumPartitions + 3,
+		}
+		if i == 1 {
+			// Invalid partition count (less than current)
+			newParts[i].NewTotalCount = newTopics[i].NumPartitions - 1
+			expError[topic] = Error{code: ErrInvalidPartitions}
+		} else {
+			expError[topic] = Error{}
+		}
+		t.Logf("Creating new partitions for %s: %d -> %d: expecting %v\n",
+			topic, newTopics[i].NumPartitions, newParts[i].NewTotalCount, expError[topic])
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), maxDuration)
+	defer cancel()
+	result, err = a.CreatePartitions(ctx, newParts, nil)
+	if err != nil {
+		t.Fatalf("CreatePartitions() failed: %s", err)
+	}
+
+	validateTopicResult(t, result, expError)
+
+	// FIXME: wait for topics to become available in metadata instead
+	time.Sleep(5000 * time.Millisecond)
+
+	// Delete the topics
+	t.Logf("Deleting topics\n")
+	deleteTopics := make([]DeleteTopic, topicCnt)
+	for i := 0; i < topicCnt; i++ {
+		deleteTopics[i] = DeleteTopic{newTopics[i].Topic}
+		if i == topicCnt-1 {
+			expError[deleteTopics[i].Topic] = Error{code: ErrUnknownTopicOrPart}
+		} else {
+			expError[deleteTopics[i].Topic] = Error{}
+		}
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), maxDuration)
+	defer cancel()
+	result2, err := a.DeleteTopics(ctx, deleteTopics, nil)
+	if err != nil {
+		t.Fatalf("DeleteTopics() failed: %s", err)
+	}
+
+	validateTopicResult(t, result2, expError)
+}
+
+func validateConfig(t *testing.T, results []ConfigResourceResult, expResults []ConfigResourceResult, checkConfigEntries bool) {
+
+	if len(results) != len(expResults) {
+		t.Fatalf("Expected %d results, got %d: %v", len(expResults), len(results), results)
+	}
+
+	for i, result := range results {
+		expResult := expResults[i]
+
+		if result.Error.Code() != expResult.Error.Code() {
+			t.Errorf("%v: Expected %v, got %v", result, expResult.Error.Code(), expResult.Error)
+			continue
+		}
+
+		if !checkConfigEntries {
+			continue
+		}
+
+		for _, e := range result.Config {
+			t.Logf("%s\n", e)
+		}
+
+		matchCnt := 0
+		for _, expEntry := range expResult.Config {
+
+			entry, ok := result.Config[expEntry.Name]
+			if !ok {
+				t.Errorf("%v: expected config %s not found in result", result, expEntry.Name)
+				continue
+			}
+
+			t.Logf("%v: compare %v =? %v\n", result, expEntry, entry)
+
+			if entry.Value != expEntry.Value {
+				t.Errorf("%v: expected config %s to have value \"%s\", not \"%s\"", result, expEntry.Name, expEntry.Value, entry.Value)
+				continue
+			}
+
+			matchCnt++
+		}
+
+		if matchCnt != len(expResult.Config) {
+			t.Errorf("%v: only %d/%d expected configs matched", result, matchCnt, len(expResult.Config))
+		}
+	}
+
+	if t.Failed() {
+		t.Fatal("ConfigResourceResult validation failed: see previous errors")
+	}
+}
+
+func TestAdminConfig(t *testing.T) {
+	rand.Seed(time.Now().Unix())
+
+	a := createAdminClient(t)
+	defer a.Close()
+
+	// Steps:
+	//  1) Create a topic, providing initial non-default configuration
+	//  2) Read back config to verify
+	//  3) Alter config
+	//  4) Read back config to verify
+	//  5) Delete the topic
+
+	topic := fmt.Sprintf("%s-config-%d", testconf.Topic, rand.Intn(100000))
+
+	// Expected config
+	expResources := []ConfigResourceResult{
+		{
+			Type: ResourceTopic,
+			Name: topic,
+			Config: map[string]ConfigEntryResult{
+				"compression.type": ConfigEntryResult{
+					Name:  "compression.type",
+					Value: "snappy",
+				},
+			},
+		},
+	}
+	// Create topic
+	newTopics := []NewTopic{{
+		Topic:             topic,
+		NumPartitions:     1,
+		ReplicationFactor: 1,
+		Config:            map[string]string{"compression.type": "snappy"},
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	topicResult, err := a.CreateTopics(ctx, newTopics, nil)
+	if err != nil {
+		t.Fatalf("Create topic request failed: %v", err)
+	}
+
+	if topicResult[0].Error.Code() != ErrNoError {
+		t.Fatalf("Failed to create topic %s: %s", topic, topicResult[0].Error)
+	}
+
+	// Read config back to validate
+	configResources := []ConfigResource{{Type: ResourceTopic, Name: topic}}
+	describeRes, err := a.DescribeConfigs(ctx, configResources, nil)
+	if err != nil {
+		t.Fatalf("Describe configs request failed: %v", err)
+	}
+
+	validateConfig(t, describeRes, expResources, true)
+
+	// Alter some configs
+	newConfig := map[string]string{"retention.ms": "86400000", "message.timestamp.type": "LogAppendTime"}
+	for k, v := range newConfig {
+		expResources[0].Config[k] = ConfigEntryResult{Name: k, Value: v}
+	}
+
+	configResources = []ConfigResource{{ResourceTopic, topic, newConfig}}
+	alterRes, err := a.AlterConfigs(ctx, configResources, nil)
+	if err != nil {
+		t.Fatalf("Alter configs request failed: %v", err)
+	}
+
+	validateConfig(t, alterRes, expResources, false)
+
+	// Read config back to validate
+	configResources = []ConfigResource{{Type: ResourceTopic, Name: topic}}
+	describeRes, err = a.DescribeConfigs(ctx, configResources, nil)
+	if err != nil {
+		t.Fatalf("Describe configs request failed: %v", err)
+	}
+
+	validateConfig(t, describeRes, expResources, true)
+
+	// Delete the topic
+	t.Logf("Deleting topic\n")
+	topicResult, err = a.DeleteTopics(ctx, []DeleteTopic{{topic}}, nil)
+	if err != nil {
+		t.Fatalf("DeleteTopics() failed: %s", err)
+	}
+
+	if topicResult[0].Error.Code() != ErrNoError {
+		t.Fatalf("Failed to delete topic %s: %s", topic, topicResult[0].Error)
+	}
+
 }
